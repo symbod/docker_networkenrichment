@@ -7,7 +7,7 @@
 ## Author: Klaudia Adamowicz
 ## Email: klaudia.adamowicz@uni-hamburg.de
 ##
-## Date Created: 2024-02-27
+## Date Created: 2024-03-04
 ##
 ## Copyright (c) Dr. Tanja Laske, 2024
 
@@ -171,40 +171,45 @@ prepare_matrix <- function(counts, md, condition_name, comparisons, out_dir,
   return(mat)
 }
 
-save_data <- function(out_dir, filename_prefix, df, full) {
-  # Construct file paths
-  meta_file_path <- file.path(out_dir, paste0(filename_prefix, "_meta.tsv"))
-  graphml_file_path <- file.path(out_dir, paste0(filename_prefix, "_network.graphml"))
+
+protein_to_gene_mapping <- function(count_data, ind_mat, gene_col) {
+  # Split and explode the Protein.IDs column
+  long_format <- count_data[, .(Protein.ID = unlist(strsplit(Protein.IDs, ";"))), by = .(Gene = get(gene_col))]
   
-  # Save data frame
-  write.table(df, meta_file_path, sep = "\t", row.names = FALSE)
+  # Remove duplicate rows
+  long_format <- unique(long_format)
   
-  # Create graphml
-  g <- graph_from_data_frame(d = full@configurations[[1]]@union_network@edges, 
-                             directed = FALSE, 
-                             vertices = result_df)
-  write_graph(graph = g, file = graphml_file_path, format = "graphml", prefixAttr = FALSE)
+  # Rename column in ind_mat
+  setnames(ind_mat, old = "gene", new = "Protein.ID")
+  
+  # Merge with ind_mat
+  merged_data <- merge(ind_mat, long_format, by = "Protein.ID", all.x = TRUE)
+  
+  return(merged_data)
 }
 
-save_meta_data <- function(df, cond, meta_data, out_dir, filename_prefix) {
+
+save_meta_data <- function(comp, cond, meta_data, out_dir, filename_prefix) {
   meta_all <- list()
-  for (comp in names(df)[-c(1,2,3)]){
-    sample_one <- strsplit(comp, split="-")[[1]][1]
-    sample_two <- strsplit(comp, split="-")[[1]][2]
-    
-    # save meta data into json 
-    sample_group <- if (cond == "TimeCond") list("Timepoint", "Condition") else if (cond == "TimeCondLoc") list("Timepoint", "Condition", "Location") else list("Condition")
-    meta_all[[comp]] = list(
-      samples_group_A = meta_data[meta_data[[cond]] %in% c(sample_one)]$Column_name,
-      samples_group_B = meta_data[meta_data[[cond]] %in% c(sample_two)]$Column_name,
-      group_A = str_split(sample_one,"_")[[1]],
-      group_B = str_split(sample_two,"_")[[1]],
-      sample_group = sample_group
-    )
-  }
+ 
+  sample_one <- strsplit(comp, split="-")[[1]][1]
+  sample_two <- strsplit(comp, split="-")[[1]][2]
+  
+  # save meta data into json 
+  sample_group <- if (cond == "TimeCond") list("Timepoint", "Condition") else if (cond == "TimeCondLoc") list("Timepoint", "Condition", "Location") else list("Condition")
+  meta_all[[comp]] = list(
+    samples_group_A = meta_data[meta_data[[cond]] %in% c(sample_one)]$Column_name,
+    samples_group_B = meta_data[meta_data[[cond]] %in% c(sample_two)]$Column_name,
+    group_A = str_split(sample_one,"_")[[1]],
+    group_B = str_split(sample_two,"_")[[1]],
+    sample_group = sample_group
+  )
+ 
   # Add links to the entire meta_all list
   meta_all_links <- list(
-    dataframe_file = file.path(out_dir, paste0(filename_prefix, "_meta.tsv")),
+    druglist = file.path(out_dir, paste0(filename_prefix, "_drugs.csv")),
+    genelist = file.path(out_dir, paste0(filename_prefix, "_genelist.csv")),
+    graph_df = file.path(out_dir, paste0(filename_prefix, "_graph.csv")),
     graph_file = file.path(out_dir, paste0(filename_prefix, "_network.graphml")))
   
   # Combine metadata with links
@@ -222,6 +227,10 @@ parser <- OptionParser()
 parser <- add_option(parser, c("-m","--meta_file"), help="Meta data description file")
 parser <- add_option(parser, c("-c","--count_file"), help="Preprocessed count file")
 parser <- add_option(parser, c("-o","--out_dir"), help="Directory for output files", default="")
+
+# Adding option for column selection
+
+parser <- add_option(parser, c("-g","--gene_column"), help="Gene column with human gene names.")
 
 # Adding new options for thresholds with defaults
 parser <- add_option(parser, c("--logFC"), help = "Boolean specifying whether to apply a logFC threshold (TRUE) or not (FALSE)", type = "logical", default = TRUE)
@@ -241,12 +250,13 @@ check_options <- function(tags){
     }
   }
 }
-check_options(c('meta_file','count_file','network_file'))
+check_options(c('meta_file','count_file','gene_column'))
 
 # save arguments
-meta_file_path <- "proteomics-genevention/example_data/plasma/metadata_input.tsv" #args$meta_file
-count_file_path <- "proteomics-genevention/example_data/plasma/normalized_counts.tsv"#args$count_file
+meta_file_path <- "proteomics-genevention/example_data/plasma/meta_data.csv" #args$meta_file
+count_file_path <- "proteomics-genevention/example_data/plasma/IRS_on_Median_normalized_data.csv"#args$count_file
 out_dir <- "proteomics-genevention/example_data/test/netenrich"#args$out_dir
+gene_column <- "Orthologs"
 
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE) #stops warnings if folder already exists
 
@@ -257,11 +267,16 @@ count_data <- fread(count_file_path)
 ## Prepare data ----
 
 #### Correct data ----
+ID_column <- "Animal"
+
 # remove ref
-meta_data <- meta_data[meta_data$ID != "ref",]
+meta_data <- meta_data[meta_data[[ID_column]] != "ref",]
 
 # convert timepoint column
-meta_data[, Timepoint := as.numeric(Timepoint)]
+meta_data[, Timepoint := sapply(Timepoint, function(tp) ifelse(grepl("pre", tp), -as.numeric(gsub("pre", "", tp)), ifelse(grepl("post", tp), as.numeric(gsub("post", "", tp)), as.numeric(tp))))]
+meta_data[, Sample_name := if ("Sample_name" %in% names(meta_data)) Sample_name else if ("Label" %in% names(meta_data)) Label else NULL]
+meta_data[, Column_name := if ("Column_name" %in% names(meta_data)) Column_name else if ("Column" %in% names(meta_data)) Column else NULL]
+#meta_data[, Timepoint := as.numeric(Timepoint)]
 
 ### Rename Columns ---
 
@@ -270,7 +285,7 @@ names(count_data) <- plyr::mapvalues(names(count_data), from = meta_data$Column_
 meta_data <- subset(meta_data, meta_data$Sample_name %in% names(count_data))
 
 # remove columns that are not in meta_data
-columns_to_keep <- c("Protein.IDs", "Gene.Names", meta_data$Sample_name)
+columns_to_keep <- c("Protein.IDs", gene_column, meta_data$Sample_name)
 existing_columns <- columns_to_keep[columns_to_keep %in% names(count_data)]
 count_data <- count_data[, existing_columns, with = FALSE]
 
@@ -324,6 +339,7 @@ for (index_a in 1:(length(elements)-1)){
 }
 ind_mat_cond <- prepare_matrix(counts=counts, md=as.data.frame(meta_data), condition_name="Condition", 
                                comparisons=comparisons, out_dir = out_dir, write_output = FALSE)
+ind_mat_cond <- protein_to_gene_mapping(count_data = count_data, ind_mat = ind_mat_cond, gene_col = gene_column)
 write.table(ind_mat_cond, file.path(out_dir, "indicator_matrix_cond.tsv"), sep="\t", row.names=FALSE)
 
 
@@ -356,7 +372,7 @@ for (index_a in 1:(length(elements)-1)){
 
 ind_mat_timecond <- prepare_matrix(counts=counts, md=as.data.frame(meta_data), condition_name=target_column, 
                                    comparisons=comparisons, out_dir = out_dir, write_output = FALSE)
-
+ind_mat_timecond <- protein_to_gene_mapping(count_data = count_data, ind_mat = ind_mat_timecond, gene_col = gene_column)
 write.table(ind_mat_timecond, file.path(out_dir,"indicator_matrix_timecond.tsv"), sep="\t", row.names=FALSE)
 
 
@@ -365,7 +381,9 @@ write.table(ind_mat_timecond, file.path(out_dir,"indicator_matrix_timecond.tsv")
 ## Functions ----
 
 run_drugstone_ami <- function(genes){
-  parameters = list("algorithm" = "multisteiner", "target" = "drug-target", "tolerance" = 5, "hubPenalty" = 0.5, "num_trees" = 5, "ppiDataset"= 'nedrex')
+  parameters = list("algorithm" = "multisteiner", "target" = "drug-target", 
+                    "tolerance" = 5, "hubPenalty" = 0.5, "num_trees" = 5, 
+                    "ppiDataset"= 'nedrex', "identifier" = "symbol")
   ds_out <- ds$new_task(genes, parameters)
   ds_results <- ds_out$get_result()
   ds_genes <- ds_results$get_genes()
@@ -410,12 +428,16 @@ save_results <- function(ds_result, filename){
 net_results <- list()
 
 if (nrow(ind_mat_cond) > 0) {
-  ds_results <- run_drugstone_ami(genes = ind_mat_cond$gene)
+  unique_genes <- unique(unlist(strsplit(na.omit(gsub("^$|^NA$", "", ind_mat_cond$Gene)), ";")))
+  ds_results <- run_drugstone_ami(genes = unique_genes)
   ds_results_2 <- run_drugstone_drugs(ds_results$ds_genes, ds_results$ds_edges,
                                       num_drugs = 100)
   
-  net_results[["cond"]] <- list("cond" = list("gene_net" = ds_results,
-                                              "drug_net" = ds_results_2))
+  net_results[["cond"]][[names(ind_mat_cond)[2]]] <- list("gene_net" = ds_results,
+                                                          "drug_net" = ds_results_2)
+  save_results(ds_result = ds_results_2, filename = "cond")
+  save_meta_data(comp = names(ind_mat_cond)[2], cond = "Condition", meta_data = meta_data,
+                 out_dir = out_dir, filename_prefix = "cond")
   
 } else {
   warning("No data found. Skipping condition vs condition analysis.")
@@ -424,21 +446,24 @@ if (nrow(ind_mat_cond) > 0) {
 
 net_results[["tp"]] <- list()
 
-for ( case in names(ind_mat_timecond)[-1] ){
+for ( case in setdiff(names(ind_mat_timecond), c("Protein.ID", "Gene"))){
   if (sum(ind_mat_timecond[[case]]) > 0) {
-    df <- ind_mat_timecond[c("gene", case)]  %>% filter(.data[[case]] != 0)
-    
-    ds_results <- run_drugstone_ami(genes = df$gene)
-    ds_results_2 <- run_drugstone_drugs(ds_results$ds_genes, ds_results$ds_edges,
-                                        num_drugs = 100)
-    kpm_results[["tp"]][[case]] <- list("gene_net" = ds_results,
-                                        "drug_net" = ds_results_2)
-    
-    ### save data
-    save_data(out_dir = out_dir, filename_prefix = paste0("timepoint_",case), 
-              df = result_df, full = result_full)
-    save_meta_data(df = result_df, cond = target_column, meta_data = meta_data, 
-                   out_dir = out_dir, filename_prefix = paste0("timepoint_",case))
+    df <- ind_mat_timecond[c("Protein.ID", "Gene", case)]  %>% filter(.data[[case]] != 0)
+    unique_genes <- unique(unlist(strsplit(na.omit(gsub("^$|^NA$", "", df$Gene)), ";")))
+    if ( length(unique_genes) > 0) {
+      ds_results <- run_drugstone_ami(genes = unique_genes)
+      ds_results_2 <- run_drugstone_drugs(ds_results$ds_genes, ds_results$ds_edges,
+                                          num_drugs = 100)
+      net_results[["tp"]][[case]] <- list("gene_net" = ds_results,
+                                          "drug_net" = ds_results_2)
+      
+      ### save data
+      if (!is.null(net_results[["tp"]][[case]])){
+        save_results(ds_result = ds_results_2, filename = paste0("timepoint_",case))
+        save_meta_data(comp = case, cond = "Condition", meta_data = meta_data,
+                       out_dir = out_dir, filename_prefix = paste0("timepoint_",case))
+      }
+    }
   } else {
     warning(paste0("No data found. Skipping ", case, " analysis."))
   }
@@ -446,11 +471,89 @@ for ( case in names(ind_mat_timecond)[-1] ){
 
 # Overview statistics ----
 
+# Initialize maps for counting unique values and drug IDs
+top_comparisons <- list()
+drugID_info <- list()
+
+# Loop through each main part and sub-part of kpm_results
+for (main_part in names(net_results)) {
+  for (sub_part in names(net_results[[main_part]])) {
+    # Convert sub-part to dataframe
+    drug_df <- do.call(rbind, lapply(net_results[[main_part]][[sub_part]]$drug_net$ds_drugs, 
+                                     function(x) as.data.frame(t(x), stringsAsFactors = FALSE)))
+    
+    # Count unique values in hasEdgesTo column
+    unique_edges <- unique(unlist(drug_df$hasEdgesTo))
+    # Update top_comparisons with the number of unique edges for the sub_part
+    top_comparisons[[sub_part]] <- length(unique_edges)
+    
+    # Count and store drugID and label
+    for (row in 1:nrow(drug_df)) {
+      drug_id <- drug_df$drugId[[row]]
+      label <- drug_df$label[[row]]
+      status <- ifelse(drug_df$status[[row]] == "approved", "approved", "unapproved")
+      edges_to <- unique(drug_df$hasEdgesTo[[row]])
+      
+      if (is.null(drugID_info[[drug_id]])) {
+        drugID_info[[drug_id]] <- list(count = 1, name = label, status = status, edges_to = edges_to)
+        } else {
+        drugID_info[[drug_id]]$count <- drugID_info[[drug_id]]$count + 1
+        drugID_info[[drug_id]]$edges_to <- unique(c(drugID_info[[drug_id]]$edges_to, edges_to))
+      }
+    }
+  }
+}
+
 ## Top comparisons ----
 
+# Convert top_comparisons list into a dataframe
+top_comparisons_df <- data.frame(comparison = names(top_comparisons),
+                                 drugtargets = unlist(top_comparisons))
 
-write.table(final_results_sorted, file.path(out_dir,"top-comparisons.tsv"), sep="\t", row.names=FALSE)
+# Sort the dataframe by drugtargets in descending order
+top_comparisons_df <- top_comparisons_df[order(-top_comparisons_df$drugtargets),]
+
+write.table(top_comparisons_df, file.path(out_dir,"top-comparisons.tsv"), sep="\t", row.names=FALSE)
 
 ## Top IDs ----
 
-write.table(id_occurrences_sorted, file.path(out_dir,"top-ids.tsv"), sep="\t", row.names=FALSE)
+# Convert drugID_info into a dataframe
+drug_info_df <- do.call(rbind, lapply(names(drugID_info), function(drug_id) {
+  info <- drugID_info[[drug_id]]
+  num_drugtargets <- length(info$edges_to)             # Count of drug targets
+  drugtargets <- paste(info$edges_to, collapse = ";")  # Concatenate the edges_to vector into a single string
+  data.frame(
+    drugId = drug_id, 
+    label = info$name, 
+    status = info$status, 
+    count = info$count, 
+    drugtargets = drugtargets, 
+    num_drugtargets = num_drugtargets, 
+    stringsAsFactors = FALSE
+  )
+}))
+
+# Convert the result into a dataframe if it's not already
+drug_info_df <- as.data.frame(drug_info_df)
+
+
+# Sort the dataframe (example: sorting by count in descending order)
+drug_info_df <- drug_info_df[order(-drug_info_df$num_drugtargets),]
+
+write.table(drug_info_df, file.path(out_dir,"top-drugs.tsv"), sep="\t", row.names=FALSE)
+
+# Extracting all drug targets and counting occurrences
+all_drugtargets <- unlist(strsplit(drug_info_df$drugtargets, ";"))
+target_counts <- table(all_drugtargets)
+
+# Check presence in 'Gene' column of ind_mat_cond or ind_mat_timecond
+is_seed <- (names(target_counts) %in% ind_mat_cond$Gene) | (names(target_counts) %in% ind_mat_timecond$Gene)
+
+# Create the final dataframe
+drugtarget_info_df <- data.frame(ID = names(target_counts), 
+                                 seed = is_seed, 
+                                 drugs = as.integer(target_counts), 
+                                 stringsAsFactors = FALSE)
+drugtarget_info_df <- drugtarget_info_df[order(-drugtarget_info_df$drugs),]
+
+write.table(drugtarget_info_df, file.path(out_dir,"top-ids.tsv"), sep="\t", row.names=FALSE)
