@@ -3,7 +3,7 @@
 params.output = "./output/"
 params.meta_file = '' // Path to meta.txt
 params.count_file = '' // Path to count.txt
-params.network_file = '' // Path to network file
+params.gene_column = '' // Name of gene column with human genes
 
 params.logFC = true
 params.logFC_up = 1
@@ -28,7 +28,7 @@ process network_enrichment {
 
     script:
     """
-    Rscript $script_file --meta_file ${meta_file} --count_file ${count_file} --out_dir ${params.output} --logFC ${params.logFC} --logFC_up ${params.logFC_up} --logFC_down ${params.logFC_down} --p_adj ${params.p_adj} --alpha ${params.alpha}
+    Rscript $script_file --meta_file ${meta_file} --count_file ${count_file} --gene_column ${params.gene_column} --out_dir ${params.output} --logFC ${params.logFC} --logFC_up ${params.logFC_up} --logFC_down ${params.logFC_down} --p_adj ${params.p_adj} --alpha ${params.alpha}
     """
 }
 

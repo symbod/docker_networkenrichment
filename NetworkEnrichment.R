@@ -21,6 +21,7 @@ suppressPackageStartupMessages({
   if(!require("limma",character.only = TRUE, quietly = TRUE)) BiocManager::install("limma")
   library("limma", character.only = TRUE)
   
+  #reticulate::use_condaenv("base", required = TRUE)
   reticulate::use_virtualenv("/home/python_env", required = TRUE)
   ds <- reticulate::import("drugstone")
   ds$print_license()
@@ -253,10 +254,10 @@ check_options <- function(tags){
 check_options(c('meta_file','count_file','gene_column'))
 
 # save arguments
-meta_file_path <- "proteomics-genevention/example_data/plasma/meta_data.csv" #args$meta_file
-count_file_path <- "proteomics-genevention/example_data/plasma/IRS_on_Median_normalized_data.csv"#args$count_file
-out_dir <- "proteomics-genevention/example_data/test/netenrich"#args$out_dir
-gene_column <- "Orthologs"
+meta_file_path <- args$meta_file
+count_file_path <- args$count_file
+out_dir <- args$out_dir
+gene_column <- args$gene_column
 
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE) #stops warnings if folder already exists
 
@@ -380,6 +381,13 @@ write.table(ind_mat_timecond, file.path(out_dir,"indicator_matrix_timecond.tsv")
 
 ## Functions ----
 
+check_symbols_in_drugstone <- function(gene_symbols) {
+  map_df_list <- ds$map_nodes(gene_symbols, list("identifier" = "symbol"))
+  map_df <- as.data.frame(do.call(rbind, map_df_list))
+  filtered_map_df <- map_df[map_df$drugstoneType != "other", ]
+  return(unlist(filtered_map_df$symbol))
+}
+
 run_drugstone_ami <- function(genes){
   parameters = list("algorithm" = "multisteiner", "target" = "drug-target", 
                     "tolerance" = 5, "hubPenalty" = 0.5, "num_trees" = 5, 
@@ -448,9 +456,11 @@ net_results[["tp"]] <- list()
 
 for ( case in setdiff(names(ind_mat_timecond), c("Protein.ID", "Gene"))){
   if (sum(ind_mat_timecond[[case]]) > 0) {
+    print(case)
     df <- ind_mat_timecond[c("Protein.ID", "Gene", case)]  %>% filter(.data[[case]] != 0)
     unique_genes <- unique(unlist(strsplit(na.omit(gsub("^$|^NA$", "", df$Gene)), ";")))
-    if ( length(unique_genes) > 0) {
+    unique_genes <- check_symbols_in_drugstone(unique_genes)
+    if ( length(unique_genes) > 1) {
       ds_results <- run_drugstone_ami(genes = unique_genes)
       ds_results_2 <- run_drugstone_drugs(ds_results$ds_genes, ds_results$ds_edges,
                                           num_drugs = 100)
