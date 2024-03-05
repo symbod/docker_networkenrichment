@@ -21,8 +21,8 @@ suppressPackageStartupMessages({
   if(!require("limma",character.only = TRUE, quietly = TRUE)) BiocManager::install("limma")
   library("limma", character.only = TRUE)
   
-  #reticulate::use_condaenv("base", required = TRUE)
-  reticulate::use_virtualenv("/home/python_env", required = TRUE)
+  reticulate::use_condaenv("base", required = TRUE)
+  #reticulate::use_virtualenv("/home/python_env", required = TRUE)
   ds <- reticulate::import("drugstone")
   ds$print_license()
   ds$accept_license()
