@@ -15,13 +15,13 @@
 suppressPackageStartupMessages({
   required_packages <- c("optparse","argparse","data.table", "tibble", "igraph", "tidyverse", "rjson", "reticulate")
   for(package in required_packages){
-    if(!require(package,character.only = TRUE)) install.packages(package)
+    #if(!require(package,character.only = TRUE)) install.packages(package)
     library(package, character.only = TRUE)
   }
-  if(!require("limma",character.only = TRUE, quietly = TRUE)) BiocManager::install("limma")
+  #if(!require("limma",character.only = TRUE, quietly = TRUE)) BiocManager::install("limma")
   library("limma", character.only = TRUE)
   
-  reticulate::use_condaenv("base", required = TRUE)
+  #reticulate::use_condaenv("base", required = TRUE)
   #reticulate::use_virtualenv("/home/python_env", required = TRUE)
   ds <- reticulate::import("drugstone")
   ds$print_license()
