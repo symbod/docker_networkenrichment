@@ -11,17 +11,21 @@ params.logFC_down = -1
 params.p_adj = true
 params.alpha = 0.05
 
+// data
+meta_file = file(params.meta_file)
+count_file = file(params.count_file)
+
 // scripts
-netenrich_analysis_script = Channel.fromPath("${projectDir}/NetworkEnrichment.R")
+netenrich_analysis_script = file("${projectDir}/NetworkEnrichment.R")
 
 process network_enrichment {
-    container 'kadam0/netenrichment:0.0.1'
+    container 'kadam0/netenrichment:0.0.2'
     publishDir params.output, mode: "copy"
 
     input:
-    path script_file from netenrich_analysis_script
-    path meta_file from Channel.fromPath(params.meta_file)
-    path count_file from Channel.fromPath(params.count_file)
+    path script_file
+    path meta_file
+    path count_file
 
     output:                                
     path "*"
@@ -33,5 +37,5 @@ process network_enrichment {
 }
 
 workflow {
-  network_enrichment()
+  network_enrichment(netenrich_analysis_script, meta_file, count_file)
 }
