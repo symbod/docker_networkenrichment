@@ -9,7 +9,7 @@ To run the pipeline, you need to specify several parameters:
 
 1. `--meta_file`: Path to the metadata file, which includes sample information like experimental conditions.
 2. `--count_file`: Path to the count file, which contains the expression data for analysis.
-3. `--network_file`: Path to the network file, providing the interaction network information.
+3. `--gene_column`: Column with human gene names.
 4. `--logFC`: Boolean flag to apply a log fold change (logFC) threshold (default: `true`).
 5. `--logFC_up`: Upper log2 fold change threshold for upregulated elements (default: `1`).
 6. `--logFC_down`: Lower log2 fold change threshold for downregulated elements (default: `-1`).
@@ -19,7 +19,7 @@ To run the pipeline, you need to specify several parameters:
 
 Example command:
 ```
-./nextflow run main.nf --meta_file path/to/meta.txt --count_file path/to/count.txt --network_file path/to/network.txt --output output_directory
+./nextflow run main.nf --meta_file path/to/meta.txt --count_file path/to/count.txt --gene_column gene_col --output output_directory --logFC TRUE --logFC_up 1 --logFC_down -1 --p_adj TRUE --alpha 0.05
 ```
 
 ## Output Description
